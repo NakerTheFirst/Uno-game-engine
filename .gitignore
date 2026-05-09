@@ -1,0 +1,11 @@
+# R junk
+.Rhistory
+.RData
+.Rproj.user/
+.DS_Store
+*.o
+*.so
+
+# R build artifacts
+src/*.o
+src/*.so

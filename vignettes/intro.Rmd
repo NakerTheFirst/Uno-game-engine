@@ -1,0 +1,276 @@
+---
+title: "Introduction to the uno package"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Introduction to the uno package}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  eval     = FALSE   # set TRUE once package is installed
+)
+library(uno)
+```
+
+## Overview
+
+The **uno** package provides a complete Uno card game engine built in R. It
+uses three OOP systems:
+
+| System | Used for |
+|--------|----------|
+| R6     | `Card`, `Deck`, `Player`, `Game` — all mutable mid-game |
+| S4     | `GameConfig` — strict slot validation before anything runs |
+| S3     | `GameResult`, `Leaderboard` — value objects with custom `print()`/`summary()` |
+
+A high-performance Rcpp simulation engine allows you to compare strategies
+across thousands of games in seconds.
+
+---
+
+## 1. Core classes
+
+### Card
+
+```{r card}
+library(uno)
+
+# Number card
+red5 <- Card$new("red", value = 5L, type = "number")
+red5
+
+# Action card — no value needed
+skip <- Card$new("blue", type = "skip")
+skip$label()      # "blue Skip"
+skip$is_action()  # TRUE
+
+# Wild — must start as "black"
+wild <- Card$new("black", type = "wild")
+wild$is_wild()    # TRUE
+
+# Compatibility check
+top  <- Card$new("red", value = 5L, type = "number")
+blue5 <- Card$new("blue", value = 5L, type = "number")
+blue5$matches(top, current_colour = "red")  # TRUE  (same value)
+```
+
+### Deck
+
+```{r deck}
+deck <- Deck$new()
+deck$size()   # 108
+
+# Draw a card
+card <- deck$draw()
+deck$size()   # 107
+
+# Deal a hand
+hand <- deck$draw_n(7L)
+length(hand)  # 7
+```
+
+### Player
+
+```{r player}
+alice <- Player$new("Alice", strategy = "aggressive")
+alice$receive_many(hand)
+alice$hand_size()   # 7
+
+# Which cards can Alice legally play?
+top_card <- deck$draw()
+legal <- alice$legal_indices(top_card, current_colour = "red")
+```
+
+### GameConfig (S4)
+
+```{r config}
+cfg <- methods::new("GameConfig",
+  n_players  = 2L,
+  hand_size  = 7L,
+  stacking   = FALSE,
+  force_play = TRUE,
+  seed       = 42L
+)
+```
+
+Validation is strict — out-of-range values throw an error:
+
+```{r config-error}
+# Throws: n_players must be in 2:4
+methods::new("GameConfig", n_players = 5L)
+```
+
+---
+
+## 2. Playing a game manually
+
+```{r manual-game}
+cfg <- methods::new("GameConfig",
+  n_players = 2L, hand_size = 7L,
+  stacking = FALSE, force_play = TRUE, seed = 1L
+)
+
+specs <- list(
+  list(name = "Alice", strategy = "aggressive"),
+  list(name = "Bob",   strategy = "random")
+)
+
+game <- Game$new(cfg, specs)
+game$top_card()$label()    # e.g. "red 7"
+game$active_colour         # e.g. "red"
+
+# Advance the game automatically (bots only)
+while (!game$is_over()) {
+  game$auto_turn()
+}
+
+# Inspect the result
+res <- game$result()
+print(res)
+```
+
+---
+
+## 3. GameResult and Leaderboard (S3)
+
+```{r results}
+# print() shows winner and standings
+print(res)
+
+# summary() returns a tibble
+summary(res)
+
+# Build a leaderboard over multiple games
+lb <- new_leaderboard()
+
+for (seed in 1:5) {
+  cfg2 <- methods::new("GameConfig",
+    n_players = 2L, hand_size = 7L, stacking = FALSE,
+    force_play = TRUE, seed = as.integer(seed)
+  )
+  g <- Game$new(cfg2, specs)
+  while (!g$is_over()) g$auto_turn()
+  lb <- add_game_result(lb, g$result())
+}
+
+print(lb)
+summary(lb)  # win rates per player
+```
+
+---
+
+## 4. Simulation with Rcpp
+
+The Rcpp engine (`simulate_games()`) runs thousands of games in seconds.
+Available strategies: `"random"`, `"aggressive"`, `"colour_matcher"`.
+
+```{r sim-basic}
+results <- simulate_games(
+  n          = 5000L,
+  strategies = c("random", "aggressive", "colour_matcher"),
+  stacking   = FALSE,
+  seed       = 42L
+)
+
+head(results)
+```
+
+### Benchmark: Rcpp vs pure-R
+
+```{r benchmark}
+library(microbenchmark)
+
+microbenchmark(
+  Rcpp = simulate_games(1000L, c("random","random")),
+  R    = simulate_games_r(100L, c("random","random")),   # 100 only — R is slow
+  times = 3L
+)
+```
+
+### Strategy comparison study
+
+```{r study}
+grid <- list(
+  c("random","random"),
+  c("aggressive","random"),
+  c("colour_matcher","random"),
+  c("random","aggressive","colour_matcher")
+)
+
+study <- run_simulation_study(grid, n_per_combo = 2000L)
+print(study[, c("strategies","win_rate_random","win_rate_aggressive",
+                "win_rate_colour_matcher")])
+```
+
+---
+
+## 5. Shiny dashboard
+
+```{r shiny}
+run_app()
+```
+
+The dashboard has three tabs:
+
+- **Play** — interactive Uno against 1–3 bots. Click cards to play, use Draw /
+  Pass buttons, choose wild colours via a dropdown.
+- **Simulate** — configure strategies and game count, run the Rcpp engine,
+  view win-rate bar charts and turn-length histograms.
+- **Leaderboard** — all Play-tab games are recorded automatically. Sortable
+  table and win-rate chart.
+
+---
+
+## 6. House rules
+
+`GameConfig` exposes two house-rule toggles:
+
+| Slot | Default | Effect |
+|------|---------|--------|
+| `stacking` | `FALSE` | Allow a player to stack +2 on +2 (or +4 on +4) instead of drawing |
+| `force_play` | `TRUE` | Player **must** play if a legal card exists (standard rule) |
+
+```{r house-rules}
+cfg_house <- methods::new("GameConfig",
+  n_players = 3L, hand_size = 7L,
+  stacking   = TRUE,   # stacking enabled
+  force_play = TRUE,
+  seed       = NA_integer_
+)
+```
+
+---
+
+## Package structure
+
+```
+uno/
+├── R/
+│   ├── 01-card.R          # Card R6 class
+│   ├── 02-deck.R          # Deck R6 class
+│   ├── 03-player.R        # Player R6 class
+│   ├── 04-game-config.R   # GameConfig S4
+│   ├── 05-game.R          # Game R6 orchestrator
+│   ├── 06-results.R       # GameResult + Leaderboard S3
+│   ├── 07-simulate-r.R    # Pure-R simulation (benchmark reference)
+│   ├── 08-simulate-cpp.R  # Rcpp wrapper + study function
+│   └── run_app.R          # run_app() launcher
+├── src/
+│   └── uno_sim.cpp        # Rcpp simulation engine
+├── inst/app/
+│   └── app.R              # Shiny dashboard
+├── tests/testthat/
+│   ├── setup.R
+│   ├── test-card.R
+│   ├── test-deck.R
+│   ├── test-player.R
+│   ├── test-game-config.R
+│   ├── test-game.R
+│   └── test-results.R
+└── vignettes/
+    └── intro.Rmd          # This document
+```

@@ -1,0 +1,36 @@
+Package: uno
+Type: Package
+Title: Uno Card Game Engine with Simulation and Shiny Dashboard
+Version: 0.1.0
+Authors@R: c(
+    person("Person", "A", role = c("aut", "cre"), email = "a@example.com"),
+    person("Person", "B", role = "aut", email = "b@example.com"),
+    person("Person", "C", role = "aut", email = "c@example.com"))
+Description: A complete Uno card game engine built with R6 for mutable game
+    state, S4 for validated configuration, and S3 for game results and
+    leaderboards. Includes an Rcpp-powered simulation engine for comparing
+    bot strategies and a Shiny dashboard for interactive play, simulation,
+    and leaderboards.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Depends: R (>= 4.0.0)
+Imports:
+    R6,
+    methods,
+    Rcpp (>= 1.0.0),
+    purrr,
+    dplyr,
+    tibble,
+    ggplot2,
+    shiny,
+    DT
+LinkingTo: Rcpp
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown,
+    microbenchmark
+Config/testthat/edition: 3
+VignetteBuilder: knitr
+Config/roxygen2/version: 8.0.0
